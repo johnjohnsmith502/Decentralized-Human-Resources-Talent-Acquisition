@@ -1,146 +1,146 @@
-;; Candidate Sourcing Contract
-;; Manages candidate profiles and sourcing activities
+;; Hiring Decision Contract
+;; Supports hiring decisions and manages the final hiring process
 
 (define-constant contract-owner tx-sender)
 (define-constant err-owner-only (err u100))
 (define-constant err-not-found (err u101))
 (define-constant err-unauthorized (err u102))
-(define-constant err-already-exists (err u103))
+(define-constant err-already-decided (err u103))
 
 ;; Data structures
-(define-map candidates
-    { candidate-id: uint }
-    {
-        candidate: principal,
-        name: (string-ascii 100),
-        skills: (string-ascii 200),
-        experience-years: uint,
-        availability: bool,
-        sourced-by: principal,
-        created-at: uint
-    }
-)
-
-(define-map job-positions
-    { position-id: uint }
-    {
-        title: (string-ascii 100),
-        requirements: (string-ascii 300),
-        posted-by: principal,
-        status: (string-ascii 20),
-        created-at: uint
-    }
-)
-
-(define-map candidate-applications
-    { application-id: uint }
+(define-map hiring-decisions
+    { decision-id: uint }
     {
         candidate-id: uint,
         position-id: uint,
-        status: (string-ascii 20),
-        applied-at: uint
+        decision: (string-ascii 20),
+        decision-maker: principal,
+        reasoning: (string-ascii 500),
+        decided-at: uint,
+        salary-offer: (optional uint)
     }
 )
 
-(define-data-var next-candidate-id uint u1)
-(define-data-var next-position-id uint u1)
-(define-data-var next-application-id uint u1)
+(define-map offer-letters
+    { offer-id: uint }
+    {
+        candidate-id: uint,
+        position-id: uint,
+        salary: uint,
+        start-date: uint,
+        benefits: (string-ascii 300),
+        status: (string-ascii 20),
+        issued-by: principal,
+        issued-at: uint
+    }
+)
+
+(define-map hiring-approvals
+    { approval-id: uint }
+    {
+        decision-id: uint,
+        approver: principal,
+        approved: bool,
+        comments: (string-ascii 200),
+        approved-at: uint
+    }
+)
+
+(define-data-var next-decision-id uint u1)
+(define-data-var next-offer-id uint u1)
+(define-data-var next-approval-id uint u1)
 
 ;; Public functions
-(define-public (register-candidate (name (string-ascii 100)) (skills (string-ascii 200)) (experience-years uint))
+(define-public (make-hiring-decision (candidate-id uint) (position-id uint) (decision (string-ascii 20)) (reasoning (string-ascii 500)) (salary-offer (optional uint)))
     (let (
-        (candidate-id (var-get next-candidate-id))
-        (candidate tx-sender)
+        (decision-id (var-get next-decision-id))
     )
-        (map-set candidates
-            { candidate-id: candidate-id }
-            {
-                candidate: candidate,
-                name: name,
-                skills: skills,
-                experience-years: experience-years,
-                availability: true,
-                sourced-by: candidate,
-                created-at: block-height
-            }
-        )
-        (var-set next-candidate-id (+ candidate-id u1))
-        (ok candidate-id)
-    )
-)
-
-(define-public (source-candidate (candidate principal) (name (string-ascii 100)) (skills (string-ascii 200)) (experience-years uint))
-    (let (
-        (candidate-id (var-get next-candidate-id))
-        (recruiter tx-sender)
-    )
-        (map-set candidates
-            { candidate-id: candidate-id }
-            {
-                candidate: candidate,
-                name: name,
-                skills: skills,
-                experience-years: experience-years,
-                availability: true,
-                sourced-by: recruiter,
-                created-at: block-height
-            }
-        )
-        (var-set next-candidate-id (+ candidate-id u1))
-        (ok candidate-id)
-    )
-)
-
-(define-public (post-job-position (title (string-ascii 100)) (requirements (string-ascii 300)))
-    (let (
-        (position-id (var-get next-position-id))
-        (employer tx-sender)
-    )
-        (map-set job-positions
-            { position-id: position-id }
-            {
-                title: title,
-                requirements: requirements,
-                posted-by: employer,
-                status: "open",
-                created-at: block-height
-            }
-        )
-        (var-set next-position-id (+ position-id u1))
-        (ok position-id)
-    )
-)
-
-(define-public (apply-for-position (candidate-id uint) (position-id uint))
-    (let (
-        (application-id (var-get next-application-id))
-        (applicant tx-sender)
-    )
-        (asserts! (is-some (map-get? candidates { candidate-id: candidate-id })) err-not-found)
-        (asserts! (is-some (map-get? job-positions { position-id: position-id })) err-not-found)
-        (map-set candidate-applications
-            { application-id: application-id }
+        (map-set hiring-decisions
+            { decision-id: decision-id }
             {
                 candidate-id: candidate-id,
                 position-id: position-id,
-                status: "applied",
-                applied-at: block-height
+                decision: decision,
+                decision-maker: tx-sender,
+                reasoning: reasoning,
+                decided-at: block-height,
+                salary-offer: salary-offer
             }
         )
-        (var-set next-application-id (+ application-id u1))
-        (ok application-id)
+        (var-set next-decision-id (+ decision-id u1))
+        (ok decision-id)
+    )
+)
+
+(define-public (issue-offer-letter (candidate-id uint) (position-id uint) (salary uint) (start-date uint) (benefits (string-ascii 300)))
+    (let (
+        (offer-id (var-get next-offer-id))
+    )
+        (map-set offer-letters
+            { offer-id: offer-id }
+            {
+                candidate-id: candidate-id,
+                position-id: position-id,
+                salary: salary,
+                start-date: start-date,
+                benefits: benefits,
+                status: "pending",
+                issued-by: tx-sender,
+                issued-at: block-height
+            }
+        )
+        (var-set next-offer-id (+ offer-id u1))
+        (ok offer-id)
+    )
+)
+
+(define-public (approve-hiring-decision (decision-id uint) (approved bool) (comments (string-ascii 200)))
+    (let (
+        (approval-id (var-get next-approval-id))
+        (decision (unwrap! (map-get? hiring-decisions { decision-id: decision-id }) err-not-found))
+    )
+        (map-set hiring-approvals
+            { approval-id: approval-id }
+            {
+                decision-id: decision-id,
+                approver: tx-sender,
+                approved: approved,
+                comments: comments,
+                approved-at: block-height
+            }
+        )
+        (var-set next-approval-id (+ approval-id u1))
+        (ok approval-id)
+    )
+)
+
+(define-public (update-offer-status (offer-id uint) (new-status (string-ascii 20)))
+    (let (
+        (offer (unwrap! (map-get? offer-letters { offer-id: offer-id }) err-not-found))
+    )
+        (asserts! (is-eq tx-sender (get issued-by offer)) err-unauthorized)
+        (map-set offer-letters
+            { offer-id: offer-id }
+            (merge offer { status: new-status })
+        )
+        (ok true)
     )
 )
 
 ;; Read-only functions
-(define-read-only (get-candidate (candidate-id uint))
-    (map-get? candidates { candidate-id: candidate-id })
+(define-read-only (get-hiring-decision (decision-id uint))
+    (map-get? hiring-decisions { decision-id: decision-id })
 )
 
-(define-read-only (get-job-position (position-id uint))
-    (map-get? job-positions { position-id: position-id })
+(define-read-only (get-offer-letter (offer-id uint))
+    (map-get? offer-letters { offer-id: offer-id })
 )
 
-(define-read-only (get-application (application-id uint))
-    (map-get? candidate-applications { application-id: application-id })
+(define-read-only (get-hiring-approval (approval-id uint))
+    (map-get? hiring-approvals { approval-id: approval-id })
 )
+
+(define-read-only (is-decision-approved (decision-id uint))
+    (default-to false
+        (get approved
+            (map-get? hiring-approvals { approval-id: decision-id }))))
